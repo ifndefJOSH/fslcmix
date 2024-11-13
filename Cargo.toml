@@ -1,0 +1,10 @@
+[package]
+name = "fslcmix"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = "4.5.20"
+eframe = "0.29.1"
+egui = "0.29.1"
+jack = "0.13.0"
