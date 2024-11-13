@@ -15,7 +15,7 @@ fn main() -> eframe::Result {
 			cc.egui_ctx.set_theme(egui::Theme::Dark);
 			// egui_extras::install_image_loaders(&cc.egui_ctx);
 
-			Ok(Box::<FslcMix>::new(FslcMix::new(10)))
+			Ok(Box::<FslcMix>::new(FslcMix::new(5)))
 		}),
 	)
 }
