@@ -151,12 +151,6 @@ impl FslcMix {
 		self.master.last = output[output.len() - 1];
 	}
 
-
-
-// }
-
-// impl eframe::App for FslcMix {
-
 	fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
 	    //egui::Window::new("Mixer (FSLCMix)")
 		//	.default_pos([100.0, 100.0])
@@ -216,8 +210,8 @@ impl MixChannel {
 				self.max = out_sample;
 			}
 			output[i] += out_sample;
+			self.last = out_sample;
 		}
-		self.last = output[output.len() - 1];
 	}
 
 	fn ui(&mut self, ui : &mut egui::Ui) {
