@@ -178,6 +178,7 @@ impl FslcMix {
 			self.ui_size = ui.min_size();
 			let window_size = self.ui_size + egui::vec2(20.0, 40.0);
 		});
+		ctx.request_repaint();
 		// frame.set_window_size(window_size);
 		// frame.request_repaint();
 	}
@@ -222,14 +223,15 @@ impl MixChannel {
 	fn ui(&mut self, ui : &mut egui::Ui) {
 		ui.vertical(|ui| {
 			ui.horizontal(|ui| {
-				ui.label(format!("Peak: {} dB", self.max.log10()));
+				ui.label(format!("Peak: {:.2} dB", self.max.log10()));
 			});
 			ui.horizontal(|ui| {
 				ui.spacing_mut().slider_width = 175.0;
 				ui.add(egui::Slider::new(&mut self.gain, 0.0..=1.2)
 					//.text("Gain")
 					.vertical());
-				self.levels_bar(ui, self.last);
+				// ui.add(egui::ProgressBar::new(self.last));
+				self.levels_bar(ui);
 			});
 
 			let btn = ui.button("Reset Gain");
@@ -245,17 +247,17 @@ impl MixChannel {
 		});
 	}
 
-	fn levels_bar(&self, ui: &mut Ui, value: f32) { 
+	fn levels_bar(&self, ui: &mut Ui) { 
 		let (rect, response) = ui.allocate_exact_size(vec2(20.0, 200.0), egui::Sense::hover()); 
 		let painter = ui.painter(); 
-		let filled_height = rect.height() * value / 1.2; // Show a bit over max amplitude 
+		let filled_height = (rect.height() * self.last / 1.2).min(rect.height()); // Show a bit over max amplitude 
 		let filled_rect = Rect::from_min_max(rect.min, rect.min + vec2(rect.width(), filled_height)); 
 		let remaining_rect = Rect::from_min_max(filled_rect.max, rect.max); 
 		painter.rect_filled(filled_rect, 0.0, Color32::from_rgb(0, 200, 0)); 
 		painter.rect_filled(remaining_rect, 0.0, Color32::from_rgb(200, 0, 0)); 
 		painter.rect_stroke(rect, 0.0, (1.0, Color32::DARK_GRAY)); 
 		response.on_hover_cursor(egui::CursorIcon::PointingHand) 
-			.on_hover_text(format!("{:.1} db", value.log10())); 
+			.on_hover_text(format!("{:.1} db", self.last.log10())); 
 	}
 
 	fn declare_jack_port(&self, client : &jack::Client) -> jack::Port<jack::AudioIn> {
