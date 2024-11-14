@@ -18,7 +18,12 @@ fn main() -> eframe::Result {
 			.with_inner_size([500.0, 325.0]),
 		..Default::default()
 	};
-	eframe::run_native(
+	let (client, _status) = jack::Client::new("fslcmix", jack::ClientOptions::default()).unwrap();
+	let process_callback = register_jack_callback(&client, shared_mix);
+	// Create process and activate the client
+	let process = jack::contrib::ClosureProcessHandler::new(process_callback);
+	let active_client = client.activate_async((), process).unwrap();
+	let result = eframe::run_native(
 		"FSLCMix", 
 		options,
 		Box::new(|cc| {
@@ -27,12 +32,15 @@ fn main() -> eframe::Result {
 			// egui_extras::install_image_loaders(&cc.egui_ctx);
 			Ok(Box::new(app))
 		}),
-	)
+	);
+	if let Err(err) = active_client.deactivate() {
+		eprintln!("JACK exited with error: {err}");
+	}
+	result
 }
 
-fn start_jack(mixer: Arc<Mutex<FslcMix>>) -> |&jack::Client, &jack::ProcessScope| -> jack::Control  {
+fn register_jack_callback(client: &jack::Client, mixer: Arc<Mutex<FslcMix>>) -> impl FnMut(&jack::Client, &jack::ProcessScope) -> jack::Control  {
 	let unlocked_mixer = mixer.lock().unwrap();
-	let (client, _status) = jack::Client::new("fslcmix", jack::ClientOptions::default()).unwrap();
 	let in_ports = unlocked_mixer.channels.iter().map(
 		|channel| channel.declare_jack_port(&client)).collect::<Vec<_>>();
 	let mut out_port = client.register_port("Master Out", jack::AudioOut::default()).unwrap();
@@ -44,14 +52,12 @@ fn start_jack(mixer: Arc<Mutex<FslcMix>>) -> |&jack::Client, &jack::ProcessScope
 			if let Ok(mut owned_mixer) = mixer.lock() {
 				owned_mixer.mix(ins, out);
 			} else {
-
+				eprintln!("Could not gain access to mutex!");
 			}
 			jack::Control::Continue
 		}
-	}
-	// Create process and activate the client
-	// let process = jack::contrib::ClosureProcessHandler::new(process_callback);
-	// client.activate_async((), process).unwrap();
+	};
+	process_callback
 }
 
 struct MixApp {
