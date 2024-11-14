@@ -2,13 +2,19 @@
 
 use clap::Parser;
 use eframe::egui::*;
+use egui_flex::{item, Flex, FlexAlignContent};
+
+use std::sync::{Arc, Mutex};
 
 fn main() -> eframe::Result {
 	let args = Args::parse();
-	let eq_box = Box::<FslcMix>::new(FslcMix::new(args.channels));
+	let shared_mix = Arc::new(Mutex::new(FslcMix::new(args.channels)));
+	let app = MixApp {
+		mix : shared_mix.clone(),
+	};
 	let options = eframe::NativeOptions {
 		viewport: egui::ViewportBuilder::default()
-			.with_inner_size([eq_box.ui_size[0], eq_box.ui_size[1]]),
+			.with_inner_size([500.0, 325.0]),
 		..Default::default()
 	};
 	eframe::run_native(
@@ -18,9 +24,44 @@ fn main() -> eframe::Result {
 			// Dark theme
 			cc.egui_ctx.set_theme(egui::Theme::Dark);
 			// egui_extras::install_image_loaders(&cc.egui_ctx);
-			Ok(eq_box)
+			Ok(Box::new(app))
 		}),
 	)
+}
+
+fn start_jack(mixer: Arc<Mutex<FslcMix>>) {
+	let unlocked_mixer = mixer.lock().unwrap();
+	let (client, _status) = jack::Client::new("fslcmix", jack::ClientOptions::default()).unwrap();
+	let in_ports = unlocked_mixer.channels.iter().map(
+		|channel| channel.declare_jack_port(&client)).collect::<Vec<_>>();
+	let mut out_port = client.register_port("Master Out", jack::AudioOut::default()).unwrap();
+	let process_callback = {
+		let mixer = Arc::clone(&mixer);
+		move |_: &jack::Client, ps: &jack::ProcessScope| -> jack::Control {
+			let ins = in_ports.iter().map(|port| port.as_slice(ps)).collect::<Vec<_>>();
+			let out = out_port.as_mut_slice(ps);
+			if let Ok(mut owned_mixer) = mixer.lock() {
+				owned_mixer.mix(ins, out);
+			} else {
+
+			}
+			jack::Control::Continue
+		}
+	};
+	// Create process and activate the client
+	let process = jack::contrib::ClosureProcessHandler::new(process_callback);
+	client.activate_async((), process).unwrap();
+}
+
+struct MixApp {
+	mix: Arc<Mutex<FslcMix>>,
+}
+
+impl eframe::App for MixApp {
+	fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+	    let mut owned_mix = self.mix.lock().unwrap();
+		owned_mix.update(ctx, frame);
+	}
 }
 
 /// A mixer that supports an arbitrary number of channels.
@@ -102,11 +143,14 @@ impl FslcMix {
 		}
 		self.master.last = output[output.len() - 1];
 	}
-}
 
-impl eframe::App for FslcMix {
 
-	fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+
+// }
+
+// impl eframe::App for FslcMix {
+
+	fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
 	    //egui::Window::new("Mixer (FSLCMix)")
 		//	.default_pos([100.0, 100.0])
 		//	.title_bar(true)
@@ -174,7 +218,10 @@ impl MixChannel {
 				ui.label(format!("Peak: {} dB", self.max.log10()));
 			});
 			ui.horizontal(|ui| {
-				ui.add(egui::Slider::new(&mut self.gain, 0.0..=1.2).text("Gain").vertical());
+				ui.spacing_mut().slider_width = 175.0;
+				ui.add(egui::Slider::new(&mut self.gain, 0.0..=1.2)
+					//.text("Gain")
+					.vertical());
 				self.levels_bar(ui, self.last);
 			});
 
@@ -198,10 +245,14 @@ impl MixChannel {
 		let filled_rect = Rect::from_min_max(rect.min, rect.min + vec2(rect.width(), filled_height)); 
 		let remaining_rect = Rect::from_min_max(filled_rect.max, rect.max); 
 		painter.rect_filled(filled_rect, 0.0, Color32::from_rgb(0, 200, 0)); 
-painter.rect_filled(remaining_rect, 0.0, Color32::from_rgb(200, 0, 0)); 
-		painter.rect_stroke(rect, 0.0, (1.0, Color32::GRAY)); 
+		painter.rect_filled(remaining_rect, 0.0, Color32::from_rgb(200, 0, 0)); 
+		painter.rect_stroke(rect, 0.0, (1.0, Color32::DARK_GRAY)); 
 		response.on_hover_cursor(egui::CursorIcon::PointingHand) 
 			.on_hover_text(format!("{:.1} db", value.log10())); 
+	}
+
+	fn declare_jack_port(&self, client : &jack::Client) -> jack::Port<jack::AudioIn> {
+		client.register_port(&self.channel_name, jack::AudioIn::default()).unwrap()
 	}
 }
 
