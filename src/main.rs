@@ -3,6 +3,7 @@
 use clap::Parser;
 use eframe::egui::*;
 use egui_flex::{item, Flex, FlexAlignContent};
+use jack::AsyncClient;
 
 use std::sync::{Arc, Mutex};
 
@@ -29,7 +30,7 @@ fn main() -> eframe::Result {
 	)
 }
 
-fn start_jack(mixer: Arc<Mutex<FslcMix>>) {
+fn start_jack(mixer: Arc<Mutex<FslcMix>>) -> |&jack::Client, &jack::ProcessScope| -> jack::Control  {
 	let unlocked_mixer = mixer.lock().unwrap();
 	let (client, _status) = jack::Client::new("fslcmix", jack::ClientOptions::default()).unwrap();
 	let in_ports = unlocked_mixer.channels.iter().map(
@@ -47,10 +48,10 @@ fn start_jack(mixer: Arc<Mutex<FslcMix>>) {
 			}
 			jack::Control::Continue
 		}
-	};
+	}
 	// Create process and activate the client
-	let process = jack::contrib::ClosureProcessHandler::new(process_callback);
-	client.activate_async((), process).unwrap();
+	// let process = jack::contrib::ClosureProcessHandler::new(process_callback);
+	// client.activate_async((), process).unwrap();
 }
 
 struct MixApp {
