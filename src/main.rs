@@ -5,8 +5,10 @@ use eframe::egui::*;
 
 fn main() -> eframe::Result {
 	let args = Args::parse();
+	let eq_box = Box::<FslcMix>::new(FslcMix::new(args.channels));
 	let options = eframe::NativeOptions {
-		viewport: egui::ViewportBuilder::default(),
+		viewport: egui::ViewportBuilder::default()
+			.with_inner_size([eq_box.ui_size[0], eq_box.ui_size[1]]),
 		..Default::default()
 	};
 	eframe::run_native(
@@ -16,8 +18,7 @@ fn main() -> eframe::Result {
 			// Dark theme
 			cc.egui_ctx.set_theme(egui::Theme::Dark);
 			// egui_extras::install_image_loaders(&cc.egui_ctx);
-
-			Ok(Box::<FslcMix>::new(FslcMix::new(args.channels)))
+			Ok(eq_box)
 		}),
 	)
 }
@@ -52,7 +53,7 @@ impl FslcMix {
 				..Default::default() 
 			},
 			normalize: false,
-			ui_size: egui::Vec2::new(400.0, 200.0), // This size doesn't matter since it's
+			ui_size: egui::Vec2::new(400.0, 330.0), // This size doesn't matter since it's
 													// overritten
 		}
 	}
@@ -104,29 +105,30 @@ impl FslcMix {
 }
 
 impl eframe::App for FslcMix {
+
 	fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
 	    //egui::Window::new("Mixer (FSLCMix)")
 		//	.default_pos([100.0, 100.0])
 		//	.title_bar(true)
-		egui::CentralPanel::default()
-			.show(ctx, |ui|{
-				ui.vertical(|ui| {
-					ui.horizontal(|ui| {
-						// ui.label("Licensed under the GPLv3.");
-						ui.toggle_value(&mut self.normalize, "Normalize")
-					});
-				});
+		egui::CentralPanel::default().show(ctx, |ui|{
+			ui.vertical(|ui| {
 				ui.horizontal(|ui| {
-					self.master.ui(ui);
-					ui.separator();
-					for channel in &mut self.channels {
-						channel.ui(ui);
-					}
+					// ui.label("Licensed under the GPLv3.");
+					ui.toggle_value(&mut self.normalize, "Normalize")
 				});
-				self.ui_size = ui.min_size();
 			});
-		let window_size = self.ui_size + egui::vec2(20.0, 40.0);
+			ui.horizontal(|ui| {
+				self.master.ui(ui);
+				ui.separator();
+				for channel in &mut self.channels {
+					channel.ui(ui);
+				}
+			});
+			self.ui_size = ui.min_size();
+			let window_size = self.ui_size + egui::vec2(20.0, 40.0);
+		});
 		// frame.set_window_size(window_size);
+		// frame.request_repaint();
 	}
 }
 
@@ -197,7 +199,7 @@ impl MixChannel {
 		let remaining_rect = Rect::from_min_max(filled_rect.max, rect.max); 
 		painter.rect_filled(filled_rect, 0.0, Color32::from_rgb(0, 200, 0)); 
 painter.rect_filled(remaining_rect, 0.0, Color32::from_rgb(200, 0, 0)); 
-		painter.rect_stroke(rect, 0.0, (1.0, Color32::WHITE)); 
+		painter.rect_stroke(rect, 0.0, (1.0, Color32::GRAY)); 
 		response.on_hover_cursor(egui::CursorIcon::PointingHand) 
 			.on_hover_text(format!("{:.1} db", value.log10())); 
 	}
