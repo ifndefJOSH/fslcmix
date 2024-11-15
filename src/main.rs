@@ -372,7 +372,7 @@ impl MixChannel {
 				Color32::DARK_GRAY);
 		}
 		response.on_hover_cursor(egui::CursorIcon::PointingHand) 
-			.on_hover_text(format!("{:.1} db", self.last.log10())); 
+			.on_hover_text(format!("{:.3} db", val)); 
 	}
 
 	fn declare_jack_port(&self, client : &jack::Client) -> jack::Port<jack::AudioIn> {
