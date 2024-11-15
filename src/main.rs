@@ -2,10 +2,7 @@
 
 use clap::Parser;
 use eframe::egui::*;
-use egui_flex::{item, Flex, FlexAlignContent};
-use jack::AsyncClient;
 
-const SMOOTHING_FACTOR: f32 = 0.01;
 const PEAK_HOLD_TIME: usize = 4000;
 const DECAY_FACTOR: f32 = 0.9999;
 
@@ -269,6 +266,7 @@ impl MixChannel {
 	}
 
 	fn levels_bar(&self, ui: &mut Ui) {
+		// TODO: log scale so dB looks nice
 		let val = if self.show_rms { 
 			self.last_rms 
 		} else {
