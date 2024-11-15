@@ -8,4 +8,3 @@ clap = { version = "4.5.20", features = ["derive"] }
 eframe = "0.29.1"
 egui = "0.29.1"
 egui_flex = "0.1.1"
-jack = "0.13.0"
