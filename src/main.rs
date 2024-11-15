@@ -6,7 +6,7 @@ use eframe::egui::*;
 const PEAK_HOLD_TIME: usize = 4000;
 const DECAY_FACTOR: f32 = 0.9999;
 
-use std::sync::{Arc, Mutex};
+use std::{process::exit, sync::{Arc, Mutex}};
 
 fn main() -> eframe::Result {
 	let args = Args::parse();
@@ -14,32 +14,54 @@ fn main() -> eframe::Result {
 	let app = MixApp {
 		mix : shared_mix.clone(),
 	};
-	let options = eframe::NativeOptions {
-		viewport: egui::ViewportBuilder::default()
-			.with_inner_size([500.0, 350.0])
-			.with_min_inner_size([300.0, 350.0])
-			.with_max_inner_size([5000.0, 350.0]),
-		..Default::default()
-	};
-	let (client, _status) = jack::Client::new("fslcmix", jack::ClientOptions::default()).unwrap();
-	let process_callback = register_jack_callback(&client, shared_mix);
-	// Create process and activate the client
-	let process = jack::contrib::ClosureProcessHandler::new(process_callback);
-	let active_client = client.activate_async((), process).unwrap();
-	let result = eframe::run_native(
-		"FSLCMix", 
-		options,
-		Box::new(|cc| {
-			// Dark theme
-			cc.egui_ctx.set_theme(egui::Theme::Dark);
-			// egui_extras::install_image_loaders(&cc.egui_ctx);
-			Ok(Box::new(app))
-		}),
-	);
-	if let Err(err) = active_client.deactivate() {
-		eprintln!("JACK exited with error: {err}");
+	if let Ok((client, _status)) = jack::Client::new("fslcmix", jack::ClientOptions::default()) {
+		let options = eframe::NativeOptions {
+			viewport: egui::ViewportBuilder::default()
+				.with_inner_size([500.0, 350.0])
+				.with_min_inner_size([300.0, 350.0])
+				.with_max_inner_size([5000.0, 350.0]),
+			..Default::default()
+		};
+
+		let process_callback = register_jack_callback(&client, shared_mix);
+		// Create process and activate the client
+		let process = jack::contrib::ClosureProcessHandler::new(process_callback);
+		let active_client = client.activate_async((), process).unwrap();
+		let result = eframe::run_native(
+			"FSLCMix", 
+			options,
+			Box::new(|cc| {
+				// Dark theme
+				cc.egui_ctx.set_theme(egui::Theme::Dark);
+				// egui_extras::install_image_loaders(&cc.egui_ctx);
+				Ok(Box::new(app))
+			}),
+		);
+		if let Err(err) = active_client.deactivate() {
+			eprintln!("JACK exited with error: {err}");
+		}
+		result
 	}
-	result
+	else {
+		eprintln!("Could not connect to JACK Audio Server.");
+		let options = eframe::NativeOptions {
+			viewport: egui::ViewportBuilder::default()
+				.with_inner_size([150.0, 80.0])
+				.with_min_inner_size([150.0, 80.0])
+				.with_max_inner_size([150.0, 80.0]),
+			..Default::default()
+		};
+
+		let result = eframe::run_native(
+			"Error - FSLCMix",
+			options,
+			Box::new(|cc| {
+				cc.egui_ctx.set_theme(egui::Theme::Dark);
+				Ok(Box::new(ErrorBox { text: "Could not connect to JACK Audio Server".to_owned(), }))
+			}),
+		);
+		result
+	}
 }
 
 fn register_jack_callback(client: &jack::Client, mixer: Arc<Mutex<FslcMix>>) -> impl FnMut(&jack::Client, &jack::ProcessScope) -> jack::Control  {
@@ -69,6 +91,25 @@ fn db_peak(val : f32) -> f32 {
 
 fn db_rms(val : f32) -> f32 {
 	10.0 * val.log10()
+}
+
+struct ErrorBox {
+	text: String,
+}
+
+impl eframe::App for ErrorBox {
+	fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+	    egui::CentralPanel::default().show(ctx, |ui| {
+			ui.vertical(|ui| {
+				ui.label(&self.text);
+				ui.horizontal(|ui| {
+					if ui.button("Okay").clicked() {
+						exit(1);
+					}
+				});
+			});
+		});
+	}
 }
 
 struct MixApp {
