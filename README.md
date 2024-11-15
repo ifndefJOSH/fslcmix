@@ -4,6 +4,12 @@ Made for my Linux Audio presentation for the USU Free Software and Linux Club (F
 
 ![Screenshot](./screenshots/screenshot.png)
 
+## Features
+
+- RMS and Peak Tracking
+- Per-track Mute, Solo and Gain
+- Per-track hard limiting
+
 To build:
 
 ```
