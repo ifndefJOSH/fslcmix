@@ -5,6 +5,10 @@ use eframe::egui::*;
 use egui_flex::{item, Flex, FlexAlignContent};
 use jack::AsyncClient;
 
+const SMOOTHING_FACTOR: f32 = 0.01;
+const PEAK_HOLD_TIME: usize = 4000;
+const DECAY_FACTOR: f32 = 0.9999;
+
 use std::sync::{Arc, Mutex};
 
 fn main() -> eframe::Result {
@@ -68,7 +72,7 @@ struct MixApp {
 
 impl eframe::App for MixApp {
 	fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-	    let mut owned_mix = self.mix.lock().unwrap();
+	   let mut owned_mix = self.mix.lock().unwrap();
 		owned_mix.update(ctx, frame);
 	}
 }
@@ -132,6 +136,7 @@ impl FslcMix {
 		// Apply the master channel's mix and normalize if necessary
 		let norm_factor = inputs.len() as f32;
 		// Bypass its mix() function since we do it slightly different here
+		self.master.rms(output);
 		for i in 0..output.len() {
 			if self.normalize {
 				output[i] /= norm_factor;
@@ -149,12 +154,13 @@ impl FslcMix {
 			}
 			output[i] = out_sample;
 
+			self.master.update_smoothed(out_sample);
 		}
 		self.master.last = output[output.len() - 1];
 	}
 
 	fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-	    //egui::Window::new("Mixer (FSLCMix)")
+	   //egui::Window::new("Mixer (FSLCMix)")
 		//	.default_pos([100.0, 100.0])
 		//	.title_bar(true)
 		egui::CentralPanel::default().show(ctx, |ui|{
@@ -185,12 +191,15 @@ impl FslcMix {
 struct MixChannel {
 	gain: f32,
 	last: f32,
+	last_smoothed: f32,
+	peak_hold_counter: usize,
 	max: f32,
 	last_rms: f32,
 	channel_name: String,
 	limit: bool,
 	mute: bool,
 	solo: bool,
+	show_rms: bool,
 }
 
 impl MixChannel {
@@ -217,6 +226,7 @@ impl MixChannel {
 			}
 			output[i] += out_sample;
 			self.last = out_sample;
+			self.update_smoothed(self.last);
 		}
 	}
 
@@ -241,29 +251,60 @@ impl MixChannel {
 				// ui.add(egui::ProgressBar::new(self.last));
 				self.levels_bar(ui);
 			});
-
-			let btn = ui.button("Reset Gain");
-			if btn.clicked() {
-				self.gain = 1.0;
-			}
+			
+			ui.horizontal(|ui| {
+				let btn = ui.button("Reset");
+				if btn.clicked() {
+					self.gain = 1.0;
+				}
+				ui.toggle_value(&mut self.show_rms, "RMS");
+			});
 			ui.horizontal(|ui| {
 				ui.toggle_value(&mut self.mute, "M");
 				ui.toggle_value(&mut self.solo, "S");
-				ui.toggle_value(&mut self.limit, "Limit");
+				ui.toggle_value(&mut self.limit, "Lim");
 			});
 			ui.add(egui::TextEdit::singleline(&mut self.channel_name).desired_width(75.0));
 		});
 	}
 
-	fn levels_bar(&self, ui: &mut Ui) { 
-		let (rect, response) = ui.allocate_exact_size(vec2(20.0, 200.0), egui::Sense::hover()); 
+	fn levels_bar(&self, ui: &mut Ui) {
+		let val = if self.show_rms { 
+			self.last_rms 
+		} else {
+			self.last_smoothed
+		};
+		let (rect, response) = ui.allocate_exact_size(vec2(15.0, 190.0), egui::Sense::hover()); 
 		let painter = ui.painter(); 
-		let filled_height = (rect.height() * self.last / 1.2).min(rect.height()); // Show a bit over max amplitude 
-		let filled_rect = Rect::from_min_max(rect.min, rect.min + vec2(rect.width(), filled_height)); 
-		let remaining_rect = Rect::from_min_max(filled_rect.max, rect.max); 
-		painter.rect_filled(remaining_rect, 0.0, Color32::from_rgb(200, 0, 0)); 
-		painter.rect_filled(filled_rect, 0.0, Color32::from_rgb(0, 200, 0)); 
-		painter.rect_stroke(rect, 0.0, (1.0, Color32::DARK_GRAY)); 
+		let filled_height = (rect.height() * val / 1.2).min(rect.height()); // Show a bit over max amplitude 
+		// let filled_rect = Rect::from_min_max(rect.min, rect.min + vec2(rect.width(), filled_height)); 
+		// let remaining_rect = Rect::from_min_max(filled_rect.max, rect.max);
+		let filled_rect = Rect::from_min_max(rect.max - vec2(rect.width(), filled_height), rect.max);
+		// let remaining_rect = Rect::from_min_max(rect.min, filled_rect.max);
+		// painter.rect_filled(remaining_rect, 0.0, Color32::from_rgb(200, 0, 0));
+		let color = if val < 1.0 { 
+			Color32::from_rgb(0, 200, 0) 
+		} else if val < 1.2 {
+			Color32::from_rgb(200, 200, 0)
+		} else { 
+			Color32::from_rgb(200, 0, 0) 
+		};
+		painter.rect_filled(filled_rect, 0.0, color); 
+		painter.rect_stroke(rect, 0.0, (1.0, Color32::DARK_GRAY));
+		// Draw scale numbers 
+		let num_steps = 12; 
+		let step_size = rect.height() / num_steps as f32; 
+		for i in 0..=num_steps { 
+			let y_pos = rect.top() + i as f32 * step_size; 
+			let number = (num_steps - i) as f32 / 10.0; 
+			// Invert the order if you want 0 at the bottom 
+			let text_pos = Pos2::new(rect.right() + 5.0, y_pos);
+			painter.text(text_pos, 
+				Align2::LEFT_CENTER, 
+				format!("{:.1}", number), 
+				FontId::new(9.0, FontFamily::Monospace),
+				Color32::DARK_GRAY);
+		}
 		response.on_hover_cursor(egui::CursorIcon::PointingHand) 
 			.on_hover_text(format!("{:.1} db", self.last.log10())); 
 	}
@@ -273,21 +314,35 @@ impl MixChannel {
 	}
 
 	fn rms(&mut self, input : &[f32]) {
-		self.last_rms = input.iter().map(|x| x * x).sum::<f32>().sqrt();
+		self.last_rms = (input.iter().map(|x| x * x).sum::<f32>() / input.len() as f32).sqrt();
+	}
+
+	fn update_smoothed(&mut self, peak : f32) {
+		if peak > self.last_smoothed {
+			self.last_smoothed = peak;
+			self.peak_hold_counter = PEAK_HOLD_TIME;
+		} else if self.peak_hold_counter > 0 {
+			self.peak_hold_counter -= 1;
+		} else {
+			self.last_smoothed *= DECAY_FACTOR;
+		}
 	}
 }
 
 impl Default for MixChannel {
 	fn default() -> Self {
-	    Self {
+	   Self {
 			gain: 1.0,
 			last: 0.0,
+			last_smoothed: 0.0,
+			peak_hold_counter: 0,
 			max: 0.0,
 			last_rms: 0.0,
 			channel_name: "Channel".to_owned(),
 			limit: false,
 			mute: false,
 			solo: false,
+			show_rms: false,
 		}
 	}
 }
