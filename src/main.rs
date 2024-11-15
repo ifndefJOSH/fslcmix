@@ -335,6 +335,11 @@ impl MixChannel {
 		} else {
 			self.last_smoothed
 		};
+		let val_db = if self.show_rms {
+			db_rms(val)
+		} else {
+			db_peak(val)
+		};
 		let (rect, response) = ui.allocate_exact_size(vec2(10.0, 190.0), egui::Sense::hover()); 
 		let painter = ui.painter(); 
 		let filled_height = (rect.height() * val / 1.2).min(rect.height()); // Show a bit over max amplitude 
@@ -372,7 +377,7 @@ impl MixChannel {
 				Color32::DARK_GRAY);
 		}
 		response.on_hover_cursor(egui::CursorIcon::PointingHand) 
-			.on_hover_text(format!("{:.3} db", val)); 
+			.on_hover_text(format!("{:.3} dB", val_db)); 
 	}
 
 	fn declare_jack_port(&self, client : &jack::Client) -> jack::Port<jack::AudioIn> {
