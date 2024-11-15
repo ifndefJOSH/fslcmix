@@ -15,7 +15,9 @@ fn main() -> eframe::Result {
 	};
 	let options = eframe::NativeOptions {
 		viewport: egui::ViewportBuilder::default()
-			.with_inner_size([500.0, 325.0]),
+			.with_inner_size([500.0, 350.0])
+			.with_min_inner_size([300.0, 350.0])
+			.with_max_inner_size([5000.0, 350.0]),
 		..Default::default()
 	};
 	let (client, _status) = jack::Client::new("fslcmix", jack::ClientOptions::default()).unwrap();
@@ -165,12 +167,14 @@ impl FslcMix {
 			ui.horizontal(|ui| {
 				self.master.ui(ui);
 				ui.separator();
-				for channel in &mut self.channels {
-					channel.ui(ui);
-				}
+				egui::ScrollArea::horizontal().show(ui, |ui| {
+					for channel in &mut self.channels {
+						channel.ui(ui);
+					}
+				});
 			});
-			self.ui_size = ui.min_size();
-			let window_size = self.ui_size + egui::vec2(20.0, 40.0);
+			self.ui_size = ctx.used_size();
+			// let window_size = self.ui_size + egui::vec2(20.0, 40.0);
 		});
 		ctx.request_repaint();
 		// frame.set_window_size(window_size);
@@ -182,6 +186,7 @@ struct MixChannel {
 	gain: f32,
 	last: f32,
 	max: f32,
+	last_rms: f32,
 	channel_name: String,
 	limit: bool,
 	mute: bool,
@@ -197,6 +202,7 @@ impl MixChannel {
 		}
 		// Sanity check
 		assert!(input.len() == output.len());
+		self.rms(input);
 		for i in 0..input.len() {
 			let sample = input[i] * self.gain;
 			let out_sample = if self.limit && sample >= 1.0 {
@@ -216,8 +222,16 @@ impl MixChannel {
 
 	fn ui(&mut self, ui : &mut egui::Ui) {
 		ui.vertical(|ui| {
-			ui.horizontal(|ui| {
-				ui.label(format!("Peak: {:.2} dB", self.max.log10()));
+			ui.vertical(|ui| {
+				let wrap_mode = TextWrapMode::Extend;
+				let pb = ui.add(egui::Button::new(format!("Peak: {:.2} dB", self.max.log10())).wrap_mode(wrap_mode));
+				if pb.clicked() {
+					self.max = 0.0;
+				}
+				let rb = ui.add(egui::Button::new(format!("RMS: {:.2}", self.last_rms)).wrap_mode(wrap_mode));
+				if rb.clicked() {
+					self.last_rms = 0.0;
+				}
 			});
 			ui.horizontal(|ui| {
 				ui.spacing_mut().slider_width = 175.0;
@@ -247,8 +261,8 @@ impl MixChannel {
 		let filled_height = (rect.height() * self.last / 1.2).min(rect.height()); // Show a bit over max amplitude 
 		let filled_rect = Rect::from_min_max(rect.min, rect.min + vec2(rect.width(), filled_height)); 
 		let remaining_rect = Rect::from_min_max(filled_rect.max, rect.max); 
-		painter.rect_filled(filled_rect, 0.0, Color32::from_rgb(0, 200, 0)); 
 		painter.rect_filled(remaining_rect, 0.0, Color32::from_rgb(200, 0, 0)); 
+		painter.rect_filled(filled_rect, 0.0, Color32::from_rgb(0, 200, 0)); 
 		painter.rect_stroke(rect, 0.0, (1.0, Color32::DARK_GRAY)); 
 		response.on_hover_cursor(egui::CursorIcon::PointingHand) 
 			.on_hover_text(format!("{:.1} db", self.last.log10())); 
@@ -256,6 +270,10 @@ impl MixChannel {
 
 	fn declare_jack_port(&self, client : &jack::Client) -> jack::Port<jack::AudioIn> {
 		client.register_port(&self.channel_name, jack::AudioIn::default()).unwrap()
+	}
+
+	fn rms(&mut self, input : &[f32]) {
+		self.last_rms = input.iter().map(|x| x * x).sum::<f32>().sqrt();
 	}
 }
 
@@ -265,6 +283,7 @@ impl Default for MixChannel {
 			gain: 1.0,
 			last: 0.0,
 			max: 0.0,
+			last_rms: 0.0,
 			channel_name: "Channel".to_owned(),
 			limit: false,
 			mute: false,
