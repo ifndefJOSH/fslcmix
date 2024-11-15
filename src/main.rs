@@ -63,13 +63,21 @@ fn register_jack_callback(client: &jack::Client, mixer: Arc<Mutex<FslcMix>>) -> 
 	process_callback
 }
 
+fn db_peak(val : f32) -> f32 {
+	20.0 * val.log10()
+}
+
+fn db_rms(val : f32) -> f32 {
+	10.0 * val.log10()
+}
+
 struct MixApp {
 	mix: Arc<Mutex<FslcMix>>,
 }
 
 impl eframe::App for MixApp {
 	fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-	   let mut owned_mix = self.mix.lock().unwrap();
+		let mut owned_mix = self.mix.lock().unwrap();
 		owned_mix.update(ctx, frame);
 	}
 }
@@ -164,7 +172,7 @@ impl FslcMix {
 			ui.vertical(|ui| {
 				ui.horizontal(|ui| {
 					// ui.label("Licensed under the GPLv3.");
-					ui.toggle_value(&mut self.normalize, "Normalize")
+					ui.toggle_value(&mut self.normalize, "Normalize");
 				});
 			});
 			ui.horizontal(|ui| {
@@ -196,16 +204,18 @@ struct MixChannel {
 	limit: bool,
 	mute: bool,
 	solo: bool,
+	others_solo: bool,
 	show_rms: bool,
 }
 
 impl MixChannel {
 
 	fn mix(&mut self, input : &[f32], output : &mut [f32], any_solo : bool) {
-		if self.mute || (any_solo && !self.solo) {
-			self.last = 0.0;
-			return;
-		}
+		// if self.mute || (any_solo && !self.solo) {
+		// 	self.last = 0.0;
+		// 	return;
+		// }
+		self.others_solo = any_solo;
 		// Sanity check
 		assert!(input.len() == output.len());
 		self.rms(input);
@@ -221,7 +231,10 @@ impl MixChannel {
 			if out_sample > self.max {
 				self.max = out_sample;
 			}
-			output[i] += out_sample;
+			// Only mix into the output if we're not muted or no other tracks have solo
+			if !(self.mute || (any_solo && !self.solo)) {
+				output[i] += out_sample;
+			}
 			self.last = out_sample;
 			self.update_smoothed(self.last);
 		}
@@ -231,11 +244,19 @@ impl MixChannel {
 		ui.vertical(|ui| {
 			ui.vertical(|ui| {
 				let wrap_mode = TextWrapMode::Extend;
-				let pb = ui.add(egui::Button::new(format!("Peak: {:.2} dB", self.max.log10())).wrap_mode(wrap_mode));
+				let pb = ui.add(egui::Button::new(
+					format!("Peak: {:+2.2} dB", db_peak(self.max)))
+					.frame(false)
+					.small()
+					.wrap_mode(wrap_mode));
 				if pb.clicked() {
 					self.max = 0.0;
 				}
-				let rb = ui.add(egui::Button::new(format!("RMS: {:.2}", self.last_rms)).wrap_mode(wrap_mode));
+				let rb = ui.add(egui::Button::new(
+					format!("RMS: {:+2.2} dB", db_rms(self.last_rms)))
+					.frame(false)
+					.small()
+					.wrap_mode(wrap_mode));
 				if rb.clicked() {
 					self.last_rms = 0.0;
 				}
@@ -244,7 +265,8 @@ impl MixChannel {
 				ui.spacing_mut().slider_width = 175.0;
 				ui.add(egui::Slider::new(&mut self.gain, 0.0..=1.2)
 					//.text("Gain")
-					.vertical());
+					.vertical()
+					.max_decimals(2));
 				// ui.add(egui::ProgressBar::new(self.last));
 				self.levels_bar(ui);
 			});
@@ -261,7 +283,7 @@ impl MixChannel {
 				ui.toggle_value(&mut self.solo, "S");
 				ui.toggle_value(&mut self.limit, "Lim");
 			});
-			ui.add(egui::TextEdit::singleline(&mut self.channel_name).desired_width(75.0));
+			ui.add(egui::TextEdit::singleline(&mut self.channel_name).desired_width(85.0));
 		});
 	}
 
@@ -272,7 +294,7 @@ impl MixChannel {
 		} else {
 			self.last_smoothed
 		};
-		let (rect, response) = ui.allocate_exact_size(vec2(15.0, 190.0), egui::Sense::hover()); 
+		let (rect, response) = ui.allocate_exact_size(vec2(10.0, 190.0), egui::Sense::hover()); 
 		let painter = ui.painter(); 
 		let filled_height = (rect.height() * val / 1.2).min(rect.height()); // Show a bit over max amplitude 
 		// let filled_rect = Rect::from_min_max(rect.min, rect.min + vec2(rect.width(), filled_height)); 
@@ -280,12 +302,13 @@ impl MixChannel {
 		let filled_rect = Rect::from_min_max(rect.max - vec2(rect.width(), filled_height), rect.max);
 		// let remaining_rect = Rect::from_min_max(rect.min, filled_rect.max);
 		// painter.rect_filled(remaining_rect, 0.0, Color32::from_rgb(200, 0, 0));
+		let color_saturation = if self.mute || (!self.solo && self.others_solo) { 50 } else { 200 };
 		let color = if val < 1.0 { 
-			Color32::from_rgb(0, 200, 0) 
+			Color32::from_rgb(0, color_saturation, 0) 
 		} else if val < 1.2 {
-			Color32::from_rgb(200, 200, 0)
+			Color32::from_rgb(color_saturation, color_saturation, 0)
 		} else { 
-			Color32::from_rgb(200, 0, 0) 
+			Color32::from_rgb(color_saturation, 0, 0) 
 		};
 		painter.rect_filled(filled_rect, 0.0, color); 
 		painter.rect_stroke(rect, 0.0, (1.0, Color32::DARK_GRAY));
@@ -294,7 +317,11 @@ impl MixChannel {
 		let step_size = rect.height() / num_steps as f32; 
 		for i in 0..=num_steps { 
 			let y_pos = rect.top() + i as f32 * step_size; 
-			let number = (num_steps - i) as f32 / 10.0; 
+			let number = if self.show_rms { 
+				db_rms((num_steps - i) as f32 / 10.0)
+			} else { 
+				db_peak((num_steps - i) as f32 / 10.0)
+			}; 
 			// Invert the order if you want 0 at the bottom 
 			let text_pos = Pos2::new(rect.right() + 5.0, y_pos);
 			painter.text(text_pos, 
@@ -340,6 +367,7 @@ impl Default for MixChannel {
 			limit: false,
 			mute: false,
 			solo: false,
+			others_solo: false,
 			show_rms: false,
 		}
 	}
