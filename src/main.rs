@@ -137,6 +137,7 @@ struct FslcMix {
 	master: MixChannel,
 	normalize: bool,
 	ui_size: egui::Vec2,
+	max_gain: f32,
 }
 
 impl FslcMix {
@@ -155,6 +156,7 @@ impl FslcMix {
 			normalize: false,
 			ui_size: egui::Vec2::new(400.0, 330.0), // This size doesn't matter since it's
 													// overritten
+			max_gain: 1.25,
 		}
 	}
 
@@ -213,7 +215,27 @@ impl FslcMix {
 			ui.vertical(|ui| {
 				ui.horizontal(|ui| {
 					// ui.label("Licensed under the GPLv3.");
+					ui.label("Max Gain:");
+					let slider = ui.add(egui::DragValue::new(&mut self.max_gain).range(1.1..=2.0));
+					if slider.changed() {
+						self.update_max_gain();
+					}
+					let btn = ui.button("Reset");
+					if btn.clicked() {
+						self.max_gain = 1.2;
+						self.update_max_gain();
+					}
 					ui.toggle_value(&mut self.normalize, "Normalize");
+					if ui.add(egui::Button::new("All Unmute").frame(false)).clicked() {
+						for channel in &mut self.channels {
+							channel.mute = false;
+						}
+					}
+					if ui.add(egui::Button::new("All Unsolo").frame(false)).clicked() {
+						for channel in &mut self.channels {
+							channel.solo = false;
+						}
+					}
 				});
 			});
 			ui.horizontal(|ui| {
@@ -232,6 +254,15 @@ impl FslcMix {
 		// frame.set_window_size(window_size);
 		// frame.request_repaint();
 	}
+
+	fn update_max_gain(&mut self) {
+		// update max gain for all channels
+		for channel in &mut self.channels {
+			channel.max_gain = self.max_gain;
+		}
+		self.master.max_gain = self.max_gain;
+
+	}
 }
 
 struct MixChannel {
@@ -247,6 +278,7 @@ struct MixChannel {
 	solo: bool,
 	others_solo: bool,
 	show_rms: bool,
+	max_gain: f32,
 }
 
 impl MixChannel {
@@ -304,7 +336,7 @@ impl MixChannel {
 			});
 			ui.horizontal(|ui| {
 				ui.spacing_mut().slider_width = 175.0;
-				ui.add(egui::Slider::new(&mut self.gain, 0.0..=1.2)
+				ui.add(egui::Slider::new(&mut self.gain, 0.0..=self.max_gain)
 					//.text("Gain")
 					.vertical()
 					.max_decimals(2));
@@ -342,7 +374,7 @@ impl MixChannel {
 		};
 		let (rect, response) = ui.allocate_exact_size(vec2(10.0, 190.0), egui::Sense::hover()); 
 		let painter = ui.painter(); 
-		let filled_height = (rect.height() * val / 1.2).min(rect.height()); // Show a bit over max amplitude 
+		let filled_height = (rect.height() * val / self.max_gain).min(rect.height()); // Show a bit over max amplitude 
 		// let filled_rect = Rect::from_min_max(rect.min, rect.min + vec2(rect.width(), filled_height)); 
 		// let remaining_rect = Rect::from_min_max(filled_rect.max, rect.max);
 		let filled_rect = Rect::from_min_max(rect.max - vec2(rect.width(), filled_height), rect.max);
@@ -351,7 +383,7 @@ impl MixChannel {
 		let color_saturation = if self.mute || (!self.solo && self.others_solo) { 50 } else { 200 };
 		let color = if val < 1.0 { 
 			Color32::from_rgb(0, color_saturation, 0) 
-		} else if val < 1.2 {
+		} else if val < self.max_gain {
 			Color32::from_rgb(color_saturation, color_saturation, 0)
 		} else { 
 			Color32::from_rgb(color_saturation, 0, 0) 
@@ -359,7 +391,7 @@ impl MixChannel {
 		painter.rect_filled(filled_rect, 0.0, color); 
 		painter.rect_stroke(rect, 0.0, (1.0, Color32::DARK_GRAY));
 		// Draw scale numbers 
-		let num_steps = 12; 
+		let num_steps = (self.max_gain * 10.0) as u16;
 		let step_size = rect.height() / num_steps as f32; 
 		for i in 0..=num_steps { 
 			let y_pos = rect.top() + i as f32 * step_size; 
@@ -415,6 +447,7 @@ impl Default for MixChannel {
 			solo: false,
 			others_solo: false,
 			show_rms: false,
+			max_gain: 1.25,
 		}
 	}
 }
